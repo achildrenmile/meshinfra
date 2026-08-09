@@ -446,12 +446,14 @@ Ad-hoc-Abfragen also sparsam und nie im Dauerbetrieb.
 
 ## 8. Was nachgewiesen ist
 
-Trennt Behauptung von Beleg.
+Trennt Behauptung von Beleg. Alle Zahlen stammen aus der Inbetriebnahme
+eines konkreten Aufbaus (Heltec V3, zwei Hosts, ein Regionalnetz) und sind
+als Beleg gedacht, nicht als Zusicherung fuer andere Aufbauten.
 
 | Behauptung | Beleg |
 |---|---|
 | Node trägt zwei gleichzeitige TCP-Clients | zwei parallele Sockets auf `:5000`, beide offen, beide mit Datenfluss |
-| Der Observer verliert nichts | Paket #7080 um 06:53:24, #7081/#7082 um **06:53:42** — die Sekunde unseres Verbindungsaufbaus — dann lückenlos bis #7134. Durchgehend `MQTT: 2/2`, Container ohne Neustart |
+| Der Observer verliert nichts | Paket #7080 um 06:53:24, #7081/#7082 um **06:53:42** — die Sekunde des Verbindungsaufbaus — dann lückenlos bis #7134. Durchgehend `MQTT: 2/2`, Container ohne Neustart |
 | Rate Limit greift | 14 eingeliefert bei Limit 12 → **12 durch, 2 verworfen** |
 | Rate Limit ist nicht umgehbar | Direkt-Publish von `infra` auf `command/` → **0 Nachrichten** beim mitlesenden `bridge` |
 | Nachricht geht wirklich in die Luft | Sendung 07:06:31; Observer meldet 07:06:34 zweimal denselben Hash `B8A76584F19089D3` mit RSSI −47 und −53 → zwei Nachbarn haben sie gehört und geflutet |
