@@ -1,0 +1,37 @@
+# Mosquitto ACL, meshinfra.
+#
+# Der Prefix steht hier FEST. Mosquitto interpoliert keine Variablen. Wer
+# MQTT_PREFIX in .env aendert, muss diese Datei mit aendern - sonst faellt
+# alles stumm auf "kein Zugriff" zurueck.
+#
+# Mosquitto 2 kennt keine Deny-Regeln. Was nicht steht, ist verboten; was
+# steht, ist erlaubt. Reihenfolge egal.
+
+# ---------------------------------------------------------------------
+# infra - die Einlieferer. Alerts, Monitoring, AI-Agent.
+# Duerfen NUR in die Warteschlange vor dem Rate-Limit schreiben, nie direkt
+# auf command/. Das ist der Punkt, an dem das Limit unumgehbar wird.
+# ---------------------------------------------------------------------
+user infra
+topic write meshinfra/tx/#
+topic read meshinfra/#
+# fuer den Container-Healthcheck
+topic read $SYS/broker/uptime
+
+# ---------------------------------------------------------------------
+# gate - das Rate-Limit-Gate. Einziger Schreiber auf command/.
+# ---------------------------------------------------------------------
+user gate
+topic read meshinfra/tx/#
+topic write meshinfra/command/#
+topic readwrite meshinfra/gate/#
+
+# ---------------------------------------------------------------------
+# bridge - meshcore-mqtt. Liest Kommandos, publiziert Empfangenes.
+# Schreibrecht bewusst breit: das Tool publiziert auf gut ein Dutzend
+# Topics (message/, events/, battery, telemetry, traceroute/, status, ...)
+# und kommt mit Updates neue dazu. Eine Aufzaehlung wuerde still brechen.
+# ---------------------------------------------------------------------
+user bridge
+topic read meshinfra/command/#
+topic write meshinfra/#

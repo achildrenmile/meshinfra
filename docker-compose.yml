@@ -1,0 +1,178 @@
+name: meshinfra
+
+# Ausgehende Bruecke: IT-Infrastruktur -> MQTT -> MeshCore-Companion (TCP).
+# Zweiter, unabhaengiger Client am selben Node. Der Observer-Stack auf
+# dem Observer-Host bleibt unangetastet.
+#
+# Alle Credentials kommen aus .env. Nichts Geheimes in dieser Datei.
+
+services:
+  # ---------------------------------------------------------------------
+  # Lokaler Broker. Eigener Broker auf dem Stack-Host, bewusst getrennt vom
+  # Broker des Observer-Stacks. Passwortdatei-Auth, kein allow_anonymous,
+  # zusaetzlich ACLs (siehe config/mosquitto/acl).
+  # ---------------------------------------------------------------------
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: meshinfra-mosquitto
+    restart: unless-stopped
+    # Nur MQTT, keine WebSockets - kleinere Angriffsflaeche. Bind-Adresse ueber
+    # .env begrenzbar; Default ist der ganze Host, damit andere LAN-Hosts
+    # publizieren koennen. Kein Traefik, keine Exposition nach aussen.
+    ports:
+      - "${MOSQUITTO_BIND:-0.0.0.0}:${MOSQUITTO_HOST_PORT:-1883}:1883"
+    environment:
+      # nur fuer den Healthcheck, nicht fuer den Broker selbst
+      MOSQ_USER: ${MQTT_USER}
+      MOSQ_PASS: ${MQTT_PASS}
+    volumes:
+      - ./config/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./config/mosquitto/passwd:/mosquitto/config/passwd:ro
+      - ./config/mosquitto/acl:/mosquitto/config/acl:ro
+      - mosquitto-data:/mosquitto/data
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -p 1883 -u \"$$MOSQ_USER\" -P \"$$MOSQ_PASS\" -t '$$SYS/broker/uptime' -C 1 -W 3 >/dev/null 2>&1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - meshinfra
+
+  # ---------------------------------------------------------------------
+  # Rate-Limit-Gate. Einziger Client, der laut ACL auf {prefix}/command/#
+  # schreiben darf. Nimmt Nachrichten auf {prefix}/tx/# entgegen, laesst
+  # hoechstens RATE_LIMIT_PER_HOUR pro rollender Stunde durch, verwirft und
+  # protokolliert den Rest.
+  #
+  # Grund: 868 MHz ist SRD-Band mit Sendezeitbegrenzung (Duty Cycle). Die
+  # eingebauten Delays von meshcore-mqtt entzerren nur den Abstand zwischen
+  # Sendungen, sie deckeln nicht die Menge pro Stunde. Ohne diesen Layer
+  # kann ein Alert-Sturm die Grenze reissen.
+  # ---------------------------------------------------------------------
+  ratelimit:
+    build: ./config/ratelimit
+    image: meshinfra-ratelimit:local
+    container_name: meshinfra-ratelimit
+    restart: unless-stopped
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    environment:
+      MQTT_BROKER: mosquitto
+      MQTT_PORT: "1883"
+      MQTT_USERNAME: ${GATE_USER}
+      MQTT_PASSWORD: ${GATE_PASS}
+      MQTT_TOPIC_PREFIX: ${MQTT_PREFIX}
+      RATE_LIMIT_PER_HOUR: ${RATE_LIMIT_PER_HOUR:-12}
+      DEFAULT_CHANNEL: ${DEFAULT_CHANNEL:-1}
+      MAX_MSG_LEN: ${MAX_MSG_LEN:-140}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - meshinfra
+
+  # ---------------------------------------------------------------------
+  # Sendefenster. Kleine Weboberflaeche zum Einliefern von Hand.
+  #
+  # Liefert ausschliesslich auf {prefix}/tx/# ein, benutzt also dasselbe
+  # infra-Konto wie ein mosquitto_pub und geht durch dasselbe Rate-Limit.
+  # Kein Sonderweg. Die Broker-Zugangsdaten bleiben im Container, der
+  # Browser sieht sie nie.
+  # ---------------------------------------------------------------------
+  webui:
+    build: ./config/webui
+    image: meshinfra-webui:local
+    container_name: meshinfra-webui
+    restart: unless-stopped
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    ports:
+      - "${WEBUI_BIND:-0.0.0.0}:${WEBUI_HOST_PORT:-8080}:8080"
+    environment:
+      MQTT_BROKER: mosquitto
+      MQTT_PORT: "1883"
+      MQTT_USERNAME: ${MQTT_USER}
+      MQTT_PASSWORD: ${MQTT_PASS}
+      MQTT_TOPIC_PREFIX: ${MQTT_PREFIX}
+      MAX_MSG_LEN: ${MAX_MSG_LEN:-140}
+      DEFAULT_CHANNEL: ${DEFAULT_CHANNEL:-2}
+      CHANNEL_LABELS: ${CHANNEL_LABELS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - meshinfra
+
+  # ---------------------------------------------------------------------
+  # Bruecke: MQTT <-> MeshCore-Companion ueber TCP.
+  # Sendet in beide Richtungen: Kommandos aus {prefix}/command/+ zum Node,
+  # empfangene Pakete/Events nach {prefix}/...
+  #
+  # message_initial_delay und message_send_delay bleiben auf 15.0 (Vorgabe).
+  # Das ist der eingebaute Airtime-Schutz. NICHT runterdrehen.
+  # ---------------------------------------------------------------------
+  meshcore-mqtt:
+    # Das GHCR-Paket ghcr.io/ipnet-mesh/meshcore-mqtt ist nicht oeffentlich
+    # (docker pull -> "denied", Paketseite 404), obwohl Tags bis v0.1.3
+    # existieren. Deshalb lokal aus dem gepinnten Upstream-Tag bauen. Pinnen
+    # statt main, damit der Stack reproduzierbar bleibt.
+    build:
+      context: https://github.com/ipnet-mesh/meshcore-mqtt.git#${MESHCORE_MQTT_VERSION:-v0.1.3}
+    image: meshinfra-meshcore-mqtt:${MESHCORE_MQTT_VERSION:-v0.1.3}
+    container_name: meshinfra-meshcore-mqtt
+    restart: unless-stopped
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    environment:
+      # --- Quelle: Companion ueber TCP ---
+      MESHCORE_CONNECTION: tcp
+      MESHCORE_ADDRESS: ${MESHCORE_HOST}
+      MESHCORE_PORT: ${MESHCORE_PORT}
+      MESHCORE_TIMEOUT: "5"
+
+      # --- Airtime-Schutz, Vorgabewerte ---
+      MESHCORE_MESSAGE_INITIAL_DELAY: "15.0"
+      MESHCORE_MESSAGE_SEND_DELAY: "15.0"
+
+      # --- MQTT: lokaler Mosquitto ---
+      MQTT_BROKER: mosquitto
+      MQTT_PORT: "1883"
+      MQTT_USERNAME: ${BRIDGE_USER}
+      MQTT_PASSWORD: ${BRIDGE_PASS}
+      MQTT_TOPIC_PREFIX: ${MQTT_PREFIX}
+      MQTT_QOS: "1"
+      # MUSS false bleiben. Ein retained Kommando wuerde nach jedem Reconnect
+      # erneut zugestellt und erneut gefunkt. Der 5s-Startup-Grace-Period im
+      # Worker faengt das nur teilweise ab.
+      MQTT_RETAIN: "false"
+
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    networks:
+      - meshinfra
+
+networks:
+  meshinfra:
+    driver: bridge
+
+volumes:
+  mosquitto-data:
