@@ -244,6 +244,35 @@ die Nachricht kommt aber nirgends an. Darum drei getrennte Broker-Konten
 
 ## Betrieb
 
+### Wo der Stack laufen sollte
+
+**Auf einem Rechner, der durchläuft** — nicht auf dem Arbeitsplatz. Der Stack ist
+der einzige Sendeweg ins Funknetz; steht er, kann niemand mehr aus der IT heraus
+etwas absetzen, und auch angeschlossene Dienste wie ein Befehlsbot fallen mit aus.
+
+Bei uns lief er anfangs auf der Workstation und ist inzwischen auf einen der
+Server umgezogen. Beim Umzug zählt vor allem eines:
+
+> **Erst den alten Stack herunterfahren, dann den neuen starten.** Ein
+> MeshCore-Companion nimmt nur **zwei** gleichzeitige TCP-Clients an. Läuft
+> daneben noch ein Observer, ist der zweite Platz belegt — der dritte Client
+> bekommt `health check failed` und die Brücke hängt.
+
+Mitzunehmen sind `.env` und der ganze `config/`-Baum. Die Passwortdatei
+`config/mosquitto/passwd` gehört UID 1883 und lässt sich als normaler Benutzer
+nicht kopieren:
+
+```bash
+# lesen (auf dem alten Host)
+docker run --rm -v "$PWD/config/mosquitto":/work alpine:3 cat /work/passwd > /tmp/passwd
+# nach dem Übertragen wieder herrichten (auf dem neuen Host)
+docker run --rm -v "$PWD/config/mosquitto":/work alpine:3 \
+  sh -c 'chown 1883:1883 /work/passwd && chmod 600 /work/passwd'
+```
+
+Danach nicht vergessen: **alle Clients auf die neue Broker-Adresse umstellen.**
+
+
 ```bash
 cd ~/stacks/meshinfra
 docker compose up -d          # hoch
