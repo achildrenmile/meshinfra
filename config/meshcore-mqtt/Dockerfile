@@ -1,6 +1,6 @@
 # Baut ipnet-mesh/meshcore-mqtt aus einem gepinnten Upstream-Tag, mit
-# einer lokalen Korrektur in mqtt_worker.py - siehe README.md in diesem
-# Verzeichnis fuer die Begruendung und Herkunft des Patches.
+# lokalen Korrekturen in mqtt_worker.py und meshcore_worker.py - siehe
+# README.md in diesem Verzeichnis fuer Begruendung und Herkunft der Patches.
 #
 # Struktur (Dependencies/Runtime-Stage) 1:1 aus dem Upstream-Dockerfile
 # uebernommen, nur um die "source"-Stage ergaenzt, die klont und den
@@ -14,8 +14,9 @@ RUN apk add --no-cache git
 WORKDIR /src
 RUN git clone --branch ${MESHCORE_MQTT_VERSION} --depth 1 \
       https://github.com/ipnet-mesh/meshcore-mqtt.git .
-# Lokaler Patch (siehe README.md) - ersetzt die Upstream-Datei komplett.
+# Lokale Patches (siehe README.md) - ersetzen die Upstream-Dateien komplett.
 COPY mqtt_worker.py meshcore_mqtt/mqtt_worker.py
+COPY meshcore_worker.py meshcore_mqtt/meshcore_worker.py
 
 FROM python:3.12-alpine AS builder
 RUN apk add --no-cache \
