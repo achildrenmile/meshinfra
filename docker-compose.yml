@@ -130,9 +130,18 @@ services:
     # (docker pull -> "denied", Paketseite 404), obwohl Tags bis v0.1.3
     # existieren. Deshalb lokal aus dem gepinnten Upstream-Tag bauen. Pinnen
     # statt main, damit der Stack reproduzierbar bleibt.
+    #
+    # 2026-09-09: von einem reinen Remote-Git-Context auf ein lokales
+    # Dockerfile (./config/meshcore-mqtt) umgestellt - das klont Upstream
+    # selbst UND spielt einen lokalen Reconnect-Fix in mqtt_worker.py ein
+    # (siehe config/meshcore-mqtt/README.md). Der zuvor manuell gepushte
+    # Tag ":v0.1.3-patched" hatte keine Entsprechung in Git - dieser Patch
+    # ist die nachtraeglich rekonstruierte, jetzt versionierte Fassung.
     build:
-      context: https://github.com/ipnet-mesh/meshcore-mqtt.git#${MESHCORE_MQTT_VERSION:-v0.1.3}
-    image: meshinfra-meshcore-mqtt:${MESHCORE_MQTT_VERSION:-v0.1.3}
+      context: ./config/meshcore-mqtt
+      args:
+        MESHCORE_MQTT_VERSION: ${MESHCORE_MQTT_VERSION:-v0.1.3}
+    image: meshinfra-meshcore-mqtt:${MESHCORE_MQTT_VERSION:-v0.1.3}-patched
     container_name: meshinfra-meshcore-mqtt
     restart: unless-stopped
     depends_on:
