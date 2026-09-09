@@ -1,0 +1,60 @@
+name: Build and push to GHCR
+
+# Baut nur bei einem bewusst gesetzten Versions-Tag (v*), nicht bei jedem
+# Commit. Zwei separate Jobs, weil dieser Stack zwei eigene Images enthaelt
+# (ratelimit, webui) - beide teilen sich einen Git-Tag/Release-Zyklus.
+#
+# NICHT enthalten: meshcore-mqtt. docker-compose.yml baut dieses Image
+# derzeit direkt aus dem UPSTREAM-Repo (github.com/ipnet-mesh/meshcore-mqtt,
+# gepinnter Tag), das laufende Cluster-Image traegt aber den Tag
+# "v0.1.3-patched" - ein tatsaechlicher Patch, der aber in keinem Git-Repo,
+# keinem Host-Archiv und keiner Doku auffindbar ist (Stand 2026-09-09,
+# siehe dcsetup docs/... Recherche). Bevor dieses Image in eine Pipeline
+# aufgenommen wird, muss zuerst geklaert werden, was genau der Patch war -
+# sonst wuerde eine automatisierte Pipeline eine unvollstaendige (unge-
+# patchte) Version bauen und stillschweigend die tatsaechlich laufende
+# ersetzen.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  ratelimit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./config/ratelimit
+          push: true
+          tags: ghcr.io/achildrenmile/meshinfra-ratelimit:${{ github.ref_name }}
+
+  webui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./config/webui
+          push: true
+          tags: ghcr.io/achildrenmile/meshinfra-webui:${{ github.ref_name }}
